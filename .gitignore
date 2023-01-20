@@ -1,8 +1,8 @@
 .Rproj.user
 .Rhistory
-*.Rdata
 .httr-oauth
 .DS_Store
+*.Rdata
 *.xlsx
 *.csv
 *.txt
@@ -12,6 +12,6 @@
 *.pdf
 *.R
 *.qmd
-*_extensions/
-*oudata/
+_extensions/
+oudata/
 
