@@ -3,3 +3,15 @@
 .Rdata
 .httr-oauth
 .DS_Store
+.xlsx
+.csv
+.txt
+.dat
+.xls
+.sav
+.pdf
+.R
+.qmd
+./_extensions
+./oudata
+
