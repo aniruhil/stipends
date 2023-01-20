@@ -1,0 +1,34 @@
+
+
+FILE LAYOUT FOR GRADUATE ASSISTANT STIPEND OUTPUT DATA
+
+COLUMNS		FIELD DESCRIPTION
+
+1 – 6		Institution (“SEC A   " for all institutions combined for Section A
+			     "SEC B   " for all institutions combined for Section B)
+
+7 –12		2010 CIP (“999999” for all CIP’s combined)
+		Note: 4-digit CIP summary data ends in ‘00’
+		(e.g. 010100), 2-digit CIP summary data ends
+		in ‘0000’ (e.g. 010000).
+
+13		Faculty Rank:		6=Teaching Assistant
+					7=Research Assistant
+					8=Graduate Associate
+					9=All ranks combined
+14-21		Low Stipend
+22-29		High Stipend
+30-37		Average Stipend
+38-43		Number of Graduate Assistants
+44-51		GA Mix Percent*
+52-57		Number of Institutions
+58-63		Salary Factor*
+66-137          CIP Code Description
+138-145         Academic Year
+
+* see Definition of Terms in the Graduate Assistant Book 
+
+Note:  Prior to 2003-04, the institution code was 4 characters.
+
+4-digit and 2-digit CIP summaries are 
+included with the 6-digit CIPs in the data files.

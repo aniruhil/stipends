@@ -1,0 +1,359 @@
+---
+title: "Processing OU Stipend Data"
+author: "The Ad Hoc Committee (Graduate Council)"
+format:
+  html:
+    theme: simplex
+    fontsize: 11pt
+filters:
+  - lightbox
+  - nutshell
+lightbox: auto
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE,
+  fig.retina = 3, fig.align = 'center', out.width = '100%',
+  fig.width = 8, fig.height = 8
+  )
+
+library(tidyverse)
+
+```
+
+# Data Cleaning
+
+Let us start by reading in the csv file.
+
+
+```{r}
+
+readr::read_csv(
+  "oudata/Stipend Analysis FY18-FY23.csv"
+  ) %>%
+  janitor::clean_names() -> stipends_1823
+
+```
+
+We have a total of `r nrow(stipends_1823)` rows of data. How many of these are unique?
+
+```{r}
+
+stipends_1823 %>%
+  group_by(
+    appointment_year, pid
+    ) %>%
+  mutate(
+    nrows = n()
+    ) -> stipends_1823
+
+```
+
+```{r}
+
+stipends_1823 %>%
+  ungroup() %>%
+  count(nrows)
+
+```
+
+### Three Rows of data?
+
+```{r}
+
+stipends_1823 %>%
+  filter(nrows == 3) %>%
+  select(1, 4, 7, 10, 11) %>%
+  arrange(pid, appointment_year, fall_offer_amount) %>%
+  DT::datatable(options = list(pageLength = 12), rownames = FALSE) %>%
+  DT::formatStyle(columns = c(1:5), fontSize = '85%')
+
+```
+
+### Two Rows of data
+
+```{r}
+
+stipends_1823 %>%
+  filter(nrows == 2) %>%
+  select(1, 4, 7, 10, 11) %>%
+  arrange(pid, appointment_year, fall_offer_amount) %>%
+  DT::datatable(options = list(pageLength = 12), rownames = FALSE) %>%
+  DT::formatStyle(columns = c(1:5), fontSize = '85%')
+
+```
+
+> So the question is: How do we reliably aggregate to the appointment year and calculate `total offer amount` and `total work hours`?
+
+
+The answer turns out to be that this is an OBI issue with a workaround:
+
+1. Create the total amount per term by adding up the amounts if the amounts differ per row
+2. Create the total amount per term by taking the amount as is if the amount does not differ per row
+3. For work hours, drop all 0 hours and add up the rest for a maximum of 20. Reset anything that exceeds 20 to 20.
+4. Make sure the dollars and the hours are aggregated separately.
+
+
+## Adding total hours per Fall term per PID
+
+```{r}
+
+stipends_1823 %>%
+  select(
+    appointment_year, pid, work_hours, stipend_type
+    ) %>%
+  filter(
+    !is.na(work_hours)
+    ) -> dfa1
+
+dfa1 %>%
+  group_by(appointment_year, pid) %>%
+  summarize(
+    total_fall_hours = sum(work_hours, na.rm = TRUE)
+    ) %>%
+  mutate(
+    total_fall_hours = ifelse(total_fall_hours > 20, 20, total_fall_hours)
+    ) -> dfa3
+
+```
+
+## Adding total amount per Fall term per PID
+
+```{r}
+
+stipends_1823 %>%
+  select(
+    appointment_year, pid, fall_offer_amount
+    ) -> dfb1
+
+dfb1 %>%
+  filter(
+    !is.na(fall_offer_amount)
+    ) %>%
+  group_by(
+    appointment_year, pid, fall_offer_amount
+    ) %>%
+  distinct(., .keep_all = TRUE) %>%
+  group_by(
+    appointment_year, pid
+    ) %>%
+  summarize(
+    total_fall_amounts = sum(fall_offer_amount, na.rm = TRUE)
+    ) -> dfb2
+
+```
+
+## Merging hours and amounts
+
+```{r}
+
+dfb2 %>%
+  full_join(
+    dfa3,
+    by = c("appointment_year", "pid")
+    ) -> dfab
+
+dfab %>%
+  ungroup() %>%
+  filter(
+    total_fall_amounts > 0 & total_fall_hours > 0
+    ) -> mydf
+
+```
+
+## Merging hours and amounts back
+
+```{r}
+
+stipends_1823 %>%
+  select(
+    appointment_year, pid, school_name,
+    program_code, program_name
+    ) %>%
+  distinct(
+    .,
+    .keep_all = TRUE
+    ) -> for_merge
+
+mydf %>%
+  left_join(
+    for_merge,
+    by = c("appointment_year", "pid")
+    ) -> stipends_df
+
+```
+
+# Adjusting for Inflation
+
+
+```{r cpi}
+
+readxl::read_excel(
+  "SeriesReport-20221208145833_79ca87.xlsx",
+  skip = 11
+  ) -> cpi_allu
+
+readxl::read_excel(
+  "SeriesReport-20221208151855_7c44f7.xlsx",
+  skip = 11
+  ) -> cpi_midwest_b
+
+cpi_midwest_b %>%
+  select(Year, Sep) %>%
+  mutate(
+    appointment_year = Year + 1
+    ) %>%
+  filter(
+    appointment_year >= 2018
+    ) -> cpi_midwest_sub
+
+cpi_midwest_sub %>%
+  mutate(
+    base_2022 = 163.861,
+    index_2022 = case_when(
+      Year == 2021 ~ 100,
+      Year != 2021 ~ (Sep / base_2022) * 100
+      )
+    ) %>%
+  mutate(
+    base_2018 = 148.023,
+    index_2018 = case_when(
+      Year == 2018 ~ 100,
+      Year != 2018 ~ (Sep / base_2018) * 100
+      )
+    ) -> cpi_midwest_sub
+
+```
+
+
+```{r}
+
+stipends_df %>%
+  left_join(
+    cpi_midwest_sub,
+    by = "appointment_year"
+    ) -> stipends
+
+stipends %>%
+  mutate(
+    real_amount_2022 = (100 / index_2022) * total_fall_amounts,
+    real_amount_2018 = (100 / index_2018) * total_fall_amounts
+  ) -> stipends
+
+stipends %>%
+  relocate(
+    appointment_year, school_name, program_name, program_code,
+    pid, total_fall_hours, total_fall_amounts, real_amount_2022,
+    real_amount_2018
+    ) -> stipends
+
+```
+
+# Now the hashids
+
+```{r}
+
+set.seed(13579)
+
+stipends %>%
+  mutate(
+    hashid = openssl::md5(pid)
+    ) -> stipends
+
+stipends %>%
+  select(pid, hashid) %>%
+  write_csv("hashid_crosswalk.csv")
+
+stipends %>%
+  ungroup() %>%
+  mutate(
+    school = case_when(
+      school_name == "GVS Leadership & Pub Affairs" ~ "GVS Leadership & Pub Service",
+      is.na(school_name) & program_name == "Social Work" & appointment_year > 2019 ~ "Health Sciences & Professions"
+      )
+    ) -> stipends
+
+stipends %>%
+  select(-pid) -> stipends
+
+save(stipends, file = "stipends_2023.RData")
+
+```
+
+
+> How about creating a single stipend database as wel to avoid all the noise?
+
+```{r}
+
+stipends_1823 %>%
+  filter(nrows == 1) -> single_stipend
+
+```
+
+```{r}
+
+single_stipend %>%
+  left_join(
+    cpi_midwest_sub,
+    by = "appointment_year"
+    ) -> single_stipend
+
+single_stipend %>%
+  mutate(
+    real_amount_2022 = (100 / index_2022) * fall_offer_amount,
+    real_amount_2018 = (100 / index_2018) * fall_offer_amount
+  ) -> single_stipend
+
+single_stipend %>%
+  relocate(
+    appointment_year, school_name, program_name, program_code,
+    pid, work_hours, fall_offer_amount, real_amount_2022,
+    real_amount_2018
+    ) -> single_stipend
+
+```
+
+# Now the hashids
+
+```{r}
+
+set.seed(13579)
+
+single_stipend %>%
+  mutate(
+    hashid = openssl::md5(pid)
+    ) -> single_stipend
+
+single_stipend %>%
+  select(pid, hashid) %>%
+  write_csv("single_stipend_hashid_crosswalk.csv")
+
+single_stipend %>%
+  ungroup() %>%
+  mutate(
+    school = case_when(
+      school_name == "GVS Leadership & Pub Affairs" ~ "GVS Leadership & Pub Service",
+      is.na(school_name) & program_name == "Social Work" & appointment_year > 2019 ~ "Health Sciences & Professions",
+      TRUE ~ school_name
+      )
+    ) -> single_stipend
+
+single_stipend %>%
+  select(-pid) -> single_stipend
+
+single_stipend %>%
+  filter(
+    !is.na(fall_offer_amount),
+    !is.na(work_hours),
+    work_hours > 0,
+    fall_offer_amount > 0
+    ) -> single_stipend
+
+save(single_stipend, file = "single_stipend_2023.RData")
+
+```
+
